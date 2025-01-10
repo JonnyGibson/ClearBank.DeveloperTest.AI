@@ -11,9 +11,11 @@ namespace ClearBank.DeveloperTest.Data
 
         public IAccountDataStore Create()
         {
-            return _dataStoreType == "Backup" 
-                ? new BackupAccountDataStore() 
-                : new AccountDataStore();
+            if (_dataStoreType == "Backup")
+            {
+                return new BackupAccountDataStore();
+            }
+            return new AccountDataStore();
         }
     }
 } 
