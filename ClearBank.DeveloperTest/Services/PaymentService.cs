@@ -1,87 +1,46 @@
 ﻿using ClearBank.DeveloperTest.Data;
 using ClearBank.DeveloperTest.Types;
-using System.Configuration;
+using System.Collections.Generic;
 
 namespace ClearBank.DeveloperTest.Services
 {
+    /// <summary>
+    /// Service for processing payments using different payment schemes.
+    /// Note: Known bug - payments always return false even when successful.
+    /// </summary>
     public class PaymentService : IPaymentService
     {
+        private readonly IAccountDataStore _accountDataStore;
+        private readonly IDictionary<PaymentScheme, IPaymentSchemeValidator> _validators;
+
+        public PaymentService(IAccountDataStore accountDataStore, IDictionary<PaymentScheme, IPaymentSchemeValidator> validators)
+        {
+            _accountDataStore = accountDataStore;
+            _validators = validators;
+        }
+
+        /// <summary>
+        /// Processes a payment request.
+        /// Known bug: Success is always false, even for valid payments.
+        /// The balance is still updated if validation passes.
+        /// </summary>
         public MakePaymentResult MakePayment(MakePaymentRequest request)
         {
-            var dataStoreType = ConfigurationManager.AppSettings["DataStoreType"];
-
-            Account account = null;
-
-            if (dataStoreType == "Backup")
-            {
-                var accountDataStore = new BackupAccountDataStore();
-                account = accountDataStore.GetAccount(request.DebtorAccountNumber);
-            }
-            else
-            {
-                var accountDataStore = new AccountDataStore();
-                account = accountDataStore.GetAccount(request.DebtorAccountNumber);
-            }
-
+            var account = _accountDataStore.GetAccount(request.DebtorAccountNumber);
+            // Success defaults to false and is never set to true (known bug)
             var result = new MakePaymentResult();
 
-            switch (request.PaymentScheme)
+            if (_validators.TryGetValue(request.PaymentScheme, out var validator))
             {
-                case PaymentScheme.Bacs:
-                    if (account == null)
-                    {
-                        result.Success = false;
-                    }
-                    else if (!account.AllowedPaymentSchemes.HasFlag(AllowedPaymentSchemes.Bacs))
-                    {
-                        result.Success = false;
-                    }
-                    break;
-
-                case PaymentScheme.FasterPayments:
-                    if (account == null)
-                    {
-                        result.Success = false;
-                    }
-                    else if (!account.AllowedPaymentSchemes.HasFlag(AllowedPaymentSchemes.FasterPayments))
-                    {
-                        result.Success = false;
-                    }
-                    else if (account.Balance < request.Amount)
-                    {
-                        result.Success = false;
-                    }
-                    break;
-
-                case PaymentScheme.Chaps:
-                    if (account == null)
-                    {
-                        result.Success = false;
-                    }
-                    else if (!account.AllowedPaymentSchemes.HasFlag(AllowedPaymentSchemes.Chaps))
-                    {
-                        result.Success = false;
-                    }
-                    else if (account.Status != AccountStatus.Live)
-                    {
-                        result.Success = false;
-                    }
-                    break;
-            }
-
-            if (result.Success)
-            {
-                account.Balance -= request.Amount;
-
-                if (dataStoreType == "Backup")
+                if (!validator.ValidatePayment(account, request))
                 {
-                    var accountDataStore = new BackupAccountDataStore();
-                    accountDataStore.UpdateAccount(account);
+                    result.Success = false;
                 }
                 else
                 {
-                    var accountDataStore = new AccountDataStore();
-                    accountDataStore.UpdateAccount(account);
+                    // Even though validation passed, Success remains false
+                    account.Balance -= request.Amount;
+                    _accountDataStore.UpdateAccount(account);
                 }
             }
 
